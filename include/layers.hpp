@@ -28,7 +28,12 @@ class DenseLayer : public Layer {
 private:
     std::vector<std::vector<float>> weights;     // Weight matrix
     std::vector<float> biases;                   // Bias vector
-    std::vector<std::vector<float>> inputs;      // Cached inputs for backpropagation
+    
+    // Memory Cache (Allocated once, reused)
+    std::vector<std::vector<float>> inputs;      // Cached inputs from forward pass
+    std::vector<std::vector<float>> outputs;     // Cached outputs
+    std::vector<std::vector<float>> input_gradients; // Cached gradients to pass back
+    
     std::vector<std::vector<float>> weight_gradients;
     std::vector<float> bias_gradients;
 
