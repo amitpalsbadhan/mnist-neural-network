@@ -46,39 +46,51 @@ std::vector<std::vector<float>> DenseLayer::backward(const std::vector<std::vect
     size_t input_size = weights.size();
     size_t output_size = weights[0].size();
 
-    // Gradients for weights, biases, and inputs
+    // Reset Gradients
     weight_gradients.assign(input_size, std::vector<float>(output_size, 0.0f));
     bias_gradients.assign(output_size, 0.0f);
     std::vector<std::vector<float>> input_gradients(batch_size, std::vector<float>(input_size, 0.0f));
 
-    #pragma omp parallel for collapse(2) schedule(static)
-    // Calculate weight and bias gradients
+    // FIX: Parallelize ONLY the batch loop (i). 
+    // Each thread handles one distinct sample in the batch completely.
+    #pragma omp parallel for schedule(static)
     for (size_t i = 0; i < batch_size; ++i) {
         for (size_t j = 0; j < output_size; ++j) {
-            bias_gradients[j] += gradient[i][j]; // Accumulate bias gradients
+            float grad = gradient[i][j];
+
+            // Atomic update for shared bias gradients (multiple threads write to bias_gradients[j])
+            #pragma omp atomic
+            bias_gradients[j] += grad;
+
             for (size_t k = 0; k < input_size; ++k) {
-                weight_gradients[k][j] += inputs[i][k] * gradient[i][j]; // Accumulate weight gradients
-                input_gradients[i][k] += gradient[i][j] * weights[k][j]; // Backpropagate to inputs
+                float input_val = inputs[i][k];
+
+                // Atomic update for shared weight gradients
+                #pragma omp atomic
+                weight_gradients[k][j] += input_val * grad;
+
+                // No atomic needed here: This thread exclusively owns row 'i' of input_gradients
+                input_gradients[i][k] += grad * weights[k][j];
             }
         }
     }
 
+    // Average gradients over the batch (Parallel Safe - distinct rows)
     #pragma omp parallel for schedule(static)
-    // Average gradients over the batch
-    for (auto& row : weight_gradients) {
-        for (auto& val : row) {
-            val /= static_cast<float>(batch_size);
+    for (size_t i = 0; i < input_size; ++i) {
+        for (size_t j = 0; j < output_size; ++j) {
+            weight_gradients[i][j] /= static_cast<float>(batch_size);
         }
     }
 
+    // Average biases (Parallel Safe - distinct indices)
     #pragma omp parallel for schedule(static)
-    for (auto& val : bias_gradients) {
-        val /= static_cast<float>(batch_size);
+    for (size_t j = 0; j < output_size; ++j) {
+        bias_gradients[j] /= static_cast<float>(batch_size);
     }
 
-    return input_gradients; // Gradient to pass to the previous layer
+    return input_gradients; 
 }
-
 
 // DenseLayer update
 void DenseLayer::update(Optimizer& optimizer) {
